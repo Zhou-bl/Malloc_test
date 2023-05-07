@@ -38,7 +38,7 @@
 #define WSIZE 4 /* Word and header/footer size (bytes) */
 #define DSIZE 8 /* Double word size (bytes) */
 #define BSIZE 16
-#define CHUNKSIZE (1<<10) /* Extend heap by this amount (bytes) */
+#define CHUNKSIZE (1<<12) /* Extend heap by this amount (bytes) */
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 #define MIN(x, y) ((x) < (y)? (x) : (y))
