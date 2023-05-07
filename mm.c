@@ -38,7 +38,8 @@
 #define WSIZE 4 /* Word and header/footer size (bytes) */
 #define DSIZE 8 /* Double word size (bytes) */
 #define BSIZE 16
-#define CHUNKSIZE (1<<12) /* Extend heap by this amount (bytes) */
+#define MINBLOCKSIZE 16
+#define CHUNKSIZE (1<<10) /* Extend heap by this amount (bytes) */
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 #define MIN(x, y) ((x) < (y)? (x) : (y))
@@ -62,7 +63,13 @@
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
 
-#define NEXT_FIT
+//Explicit free list:
+#define GET_PREV(p) (*(unsigned int *)(p))
+#define SET_PREV(p, prev) (*(unsigned int *)(p) = (prev))
+#define GET_NEXT(p) (*((unsigned int *)(p)+1))
+#define SET_NEXT(p, val) (*((unsigned int *)(p)+1) = (val))
+
+//#define NEXT_FIT
 
 #ifdef NEXT_FIT
 static char *recover;
@@ -73,6 +80,7 @@ static char *recover;
  * mm_init - Called when a new trace starts.
  */
 static char *heap_listp = 0;
+static char *free_list_head = 0;
 
 //Some tool functions:
 
@@ -81,6 +89,46 @@ static void *coalesce(void *bp);
 static void *find_fit(size_t asize);
 static void place(void *bp, size_t asize);
 
+static void remove_from_free_list(void *bp){
+    //被分配了或者空指针直接返回：
+    if(bp == NULL || GET_ALLOC(HDRP(bp))){
+        return;
+    }
+    void *prev, *next;
+    prev = GET_PREV(bp); next = GET_NEXT(bp);
+    SET_PREV(bp, 0); SET_NEXT(bp, 0);//消除前驱后继
+    if(prev == NULL && next == NULL){
+        free_list_head = NULL;
+    }
+    else if(prev == NULL && next != NULL){
+        //next 成为第一个空节点:
+        SET_PREV(next, 0);
+        free_list_head = next;
+    }
+    else if(prev != NULL && next == NULL){
+        SET_NEXT(prev, 0);
+    }
+    else {
+        SET_NEXT(prev, next);
+        SET_PREV(next, prev);
+    }
+}
+
+static void insert_to_free_list(void *bp){
+    if(bp == NULL) return;
+    //如果列表是空的，直接插入
+    if(free_list_head == NULL){
+        free_list_head = bp;
+    }
+    else {
+        //插到头部：
+        SET_NEXT(bp, free_list_head);
+        SET_PREV(free_list_head, bp);
+        free_list_head = bp;
+    }
+    return;
+}
+
 static void *extend_heap(size_t words){
     char *bp;
     words = (words & 1) ? (words + 1) * WSIZE : words * WSIZE;
@@ -88,6 +136,7 @@ static void *extend_heap(size_t words){
     //将原来尾块的头部（尾块只有头部）替换为新的空闲块的头部，新的空闲块的大小为words，然后设定新的尾块以及新的空闲块的尾部
     PUT(HDRP(bp), PACK(words, 0)); //free block header
     PUT(FTRP(bp), PACK(words, 0)); //free block footer
+    SET_PREV(bp, 0); SET_NEXT(bp, 0); //不插入空闲链表
     PUT(HDRP(NEXT_BLKP(bp)), PACK(0, 1)); //new epilogue header
     return coalesce(bp);
 }
@@ -103,17 +152,21 @@ static void *coalesce(void *bp){
         return bp;
     }
     else if (prev_alloc && !next_alloc){
+        remove_from_free_list(NEXT_BLKP(bp));
         size += GET_SIZE(HDRP(NEXT_BLKP(bp)));
         PUT(HDRP(bp), PACK(size, 0));
         PUT(FTRP(bp), PACK(size, 0));
     }
     else if (!prev_alloc && next_alloc){
+        remove_from_free_list(PREV_BLKP(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp)));
         PUT(FTRP(bp), PACK(size, 0));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
     else {
+        remove_from_free_list(PREV_BLKP(bp));
+        remove_from_free_list(NEXT_BLKP(bp));
         size += GET_SIZE(HDRP(PREV_BLKP(bp))) + GET_SIZE(FTRP(NEXT_BLKP(bp)));
         PUT(HDRP(PREV_BLKP(bp)), PACK(size, 0));
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
@@ -124,12 +177,31 @@ static void *coalesce(void *bp){
         recover = bp;
     }
 #endif
+    insert_to_free_list(bp);
     return bp;
 
 }
 
-static void *find_fit(size_t asize){
+static void *find_fit_in_list(size_t asize){
+    for(void *bp = free_list_head; bp != 0; bp = GET_NEXT(bp)){
+        if(GET_SIZE(HDRP(bp)) >= asize){
+            return bp;
+        }
+    }
+    return NULL;
+}
 
+static void *find_fit(size_t asize){
+    void *bp = find_fit_in_list(asize);
+    if(bp != NULL) return bp;
+    else {
+        for(bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)){
+        if(!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))){
+            return bp;
+        }
+    }
+        return NULL;
+    }
 #ifdef NEXT_FIT
     char *oldrecover = recover;
     //Search from the recover pointer:
@@ -145,23 +217,21 @@ static void *find_fit(size_t asize){
     return NULL;
 #endif
 
-    void *bp;
-    for(bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)){
-        if(!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))){
-            return bp;
-        }
-    }
-    return NULL;
+    
 }
 
 static void place(void *bp, size_t asize){
     size_t csize = GET_SIZE(HDRP(bp));
-    if((csize - asize) >= (2 * DSIZE)){
+    remove_from_free_list(bp);
+
+    if((csize - asize) >= MINBLOCKSIZE){
         PUT(HDRP(bp), PACK(asize, 1));
         PUT(FTRP(bp), PACK(asize, 1));
         bp = NEXT_BLKP(bp);
         PUT(HDRP(bp), PACK(csize - asize, 0));
         PUT(FTRP(bp), PACK(csize - asize, 0));
+        SET_PREV(bp, 0); SET_NEXT(bp, 0);
+        coalesce(bp);
     } else {
         PUT(HDRP(bp), PACK(csize, 1));
         PUT(FTRP(bp), PACK(csize, 1));
@@ -176,6 +246,7 @@ int mm_init(void){
     PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));
     PUT(heap_listp + (3 * WSIZE), PACK(0, 1));
     heap_listp += (2 * WSIZE); //指向序言块的尾部
+    free_list_head = NULL;
 
 #ifdef NEXT_FIT
     recover = heap_listp;
@@ -185,9 +256,8 @@ int mm_init(void){
     if(extend_heap(CHUNKSIZE / WSIZE) == NULL) return -1;
     return 0;
 }
-size_t malloc_cnt = 0;
+
 void *malloc(size_t size){
-    malloc_cnt++;
     size_t adjust_size, extend_size;
     char *bp;
     //忽略无效请求
@@ -218,6 +288,7 @@ void free(void *ptr){
     }
     PUT(HDRP(ptr), PACK(size, 0));
     PUT(FTRP(ptr), PACK(size, 0));
+    SET_PREV(ptr, 0); SET_NEXT(ptr, 0);
     coalesce(ptr);
 }
 
