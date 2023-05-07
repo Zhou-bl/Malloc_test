@@ -38,7 +38,7 @@
 #define WSIZE 4 /* Word and header/footer size (bytes) */
 #define DSIZE 8 /* Double word size (bytes) */
 #define BSIZE 16
-#define CHUNKSIZE (1<<8) /* Extend heap by this amount (bytes) */
+#define CHUNKSIZE (1<<10) /* Extend heap by this amount (bytes) */
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 #define MIN(x, y) ((x) < (y)? (x) : (y))
@@ -61,6 +61,13 @@
 /* Given block ptr bp, compute address of next and previous blocks */
 #define NEXT_BLKP(bp) ((char *)(bp) + GET_SIZE(((char *)(bp) - WSIZE)))
 #define PREV_BLKP(bp) ((char *)(bp) - GET_SIZE(((char *)(bp) - DSIZE)))
+
+#define NEXT_FIT
+
+#ifdef NEXT_FIT
+static char *recover;
+#endif
+
 
 /*
  * mm_init - Called when a new trace starts.
@@ -112,11 +119,32 @@ static void *coalesce(void *bp){
         PUT(FTRP(NEXT_BLKP(bp)), PACK(size, 0));
         bp = PREV_BLKP(bp);
     }
+#ifdef NEXT_FIT
+    if((recover > (char *)bp) && (recover < NEXT_BLKP(bp))){
+        recover = bp;
+    }
+#endif
     return bp;
 
 }
 
 static void *find_fit(size_t asize){
+
+#ifdef NEXT_FIT
+    char *oldrecover = recover;
+    //Search from the recover pointer:
+    for(; GET_SIZE(HDRP(recover)) > 0; recover = NEXT_BLKP(recover)){
+        if(!GET_ALLOC(HDRP(recover)) && (asize <= GET_SIZE(HDRP(recover))))
+            return recover;
+    }
+    //Search from the start of the list:
+    for(recover = heap_listp; recover < oldrecover; recover = NEXT_BLKP(recover)){
+        if(!GET_ALLOC(HDRP(recover)) && (asize <= GET_SIZE(HDRP(recover))))
+            return recover;
+    }
+    return NULL;
+#endif
+
     void *bp;
     for(bp = heap_listp; GET_SIZE(HDRP(bp)) > 0; bp = NEXT_BLKP(bp)){
         if(!GET_ALLOC(HDRP(bp)) && (asize <= GET_SIZE(HDRP(bp)))){
@@ -148,6 +176,11 @@ int mm_init(void){
     PUT(heap_listp + (2 * WSIZE), PACK(DSIZE, 1));
     PUT(heap_listp + (3 * WSIZE), PACK(0, 1));
     heap_listp += (2 * WSIZE); //指向序言块的尾部
+
+#ifdef NEXT_FIT
+    recover = heap_listp;
+#endif
+
     //扩展堆
     if(extend_heap(CHUNKSIZE / WSIZE) == NULL) return -1;
     return 0;
