@@ -39,7 +39,7 @@
 #define DSIZE 8 /* Double word size (bytes) */
 #define BSIZE 16
 #define MINBLOCKSIZE 16
-#define CHUNKSIZE (1<<8) /* Extend heap by this amount (bytes) */
+#define CHUNKSIZE (1<<9) /* Extend heap by this amount (bytes) */
 
 #define MAX(x, y) ((x) > (y)? (x) : (y))
 #define MIN(x, y) ((x) < (y)? (x) : (y))
