@@ -84,7 +84,7 @@
 #define PREALLOC(x) ((!x) ? 0 : 2)
 
 //Use some strange mathod to change the strategy: 选取前 FIRST_FIT_NUM 个空闲块中最小的一个:
-#define FIRST_FIT_NUM 7
+#define FIRST_FIT_NUM 5
 
 #ifdef NEXT_FIT
 static char *recover;
@@ -339,8 +339,8 @@ void *malloc(size_t size){
         return bp;
     }
     //没有找到合适的空闲块，扩展堆
-    //extend_size = MAX(adjust_size, CHUNKSIZE);
-    extend_size = adjust_size;
+    extend_size = MAX(adjust_size, CHUNKSIZE);
+    //extend_size = adjust_size;
     if((bp = extend_heap(extend_size / WSIZE)) == NULL) return NULL;
     //printf("hhh extend!\n");
     place(bp, adjust_size);
