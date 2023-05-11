@@ -84,7 +84,7 @@
 #define PREALLOC(x) ((!x) ? 0 : 2)
 
 //Use some strange mathod to change the strategy: 选取前 FIRST_FIT_NUM 个空闲块中最小的一个:
-#define FIRST_FIT_NUM 5
+#define FIRST_FIT_NUM 8
 
 #ifdef NEXT_FIT
 static char *recover;
@@ -254,6 +254,7 @@ static void *find_num_fit_in_list(size_t asize){
     for(void *bp = free_list_head; bp != NULL && cur_num < FIRST_FIT_NUM; bp = GET_NEXT(bp)){
         if(GET_SIZE(HDRP(bp)) >= asize){
             cur_num++;
+            if(asize == GET_SIZE(HDRP(bp))) return bp;//遇到最优的直接返回
             if(!res_bp){
                 res_bp = bp;
                 cur_size = GET_SIZE(HDRP(bp));
@@ -339,8 +340,8 @@ void *malloc(size_t size){
         return bp;
     }
     //没有找到合适的空闲块，扩展堆
-    extend_size = MAX(adjust_size, CHUNKSIZE);
-    //extend_size = adjust_size;
+    //extend_size = MAX(adjust_size, CHUNKSIZE);
+    extend_size = adjust_size;
     if((bp = extend_heap(extend_size / WSIZE)) == NULL) return NULL;
     //printf("hhh extend!\n");
     place(bp, adjust_size);
